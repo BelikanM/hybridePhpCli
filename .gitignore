@@ -1,0 +1,7 @@
+node_modules/
+*.log
+.env
+mysql_data/
+hybridephp.db
+.DS_Store
+Thumbs.db

@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: hybridephp-app_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: hybridephp_db
+      MYSQL_USER: hybridephp_user
+      MYSQL_PASSWORD: hybridephp_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  php:
+    image: php:8.1-apache
+    container_name: hybridephp-app_php
+    ports:
+      - "8000:80"
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      - mysql
+    environment:
+      - DOCKER_ENV=true
+    restart: unless-stopped
+    command: >
+      bash -c "
+        docker-php-ext-install pdo pdo_mysql &&
+        a2enmod rewrite &&
+        apache2-foreground
+      "
+
+  node:
+    image: node:18-alpine
+    container_name: hybridephp-app_node
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    command: sh -c "npm install && npm start"
+
+volumes:
+  mysql_data:
