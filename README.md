@@ -15,3 +15,4 @@ wget https://raw.githubusercontent.com/VOTRE-USERNAME/hybridephp-installer/main/
 chmod +x install.sh
 ./install.sh mon-projet
 
+# hybridePhpCli
