@@ -9,144 +9,162 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// Configuration base de données
 class Database {
     private static $instance = null;
     private $conn;
+
+    // Mettre ici les identifiants root ou un utilisateur ayant droit de créer db + user
+    private $rootHost = '127.0.0.1';
+    private $rootUser = 'root';
+    private $rootPass = ''; // À remplir si tu as un mot de passe root MySQL
     
+    private $dbName = 'hybridephp_db';
+    private $dbUser = 'BelikanM';
+    private $dbPass = 'Dieu19961991??!??!';
+    private $dbHost = '127.0.0.1';
+
     private function __construct() {
-        $host = 'localhost';
-        $dbname = 'hybridephp_db';
-        $username = 'root';
-        $password = '';
-        
-        // Pour Docker
-        if (getenv('DOCKER_ENV')) {
-            $host = 'mysql';
-            $username = 'hybridephp_user';
-            $password = 'hybridephp_pass';
-        }
-        
         try {
+            // Connexion MySQL root pour création base et user si non faits
+            $pdoRoot = new PDO("mysql:host={$this->rootHost}", $this->rootUser, $this->rootPass,
+                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+
+            // Création base si elle n'existe pas
+            $pdoRoot->exec("CREATE DATABASE IF NOT EXISTS `{$this->dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+
+            // Création utilisateur et attribution privilèges
+            // Note : adapte host si nécessaire (ici 'localhost' et 127.0.0.1 autorisés)
+            $pdoRoot->exec("CREATE USER IF NOT EXISTS '{$this->dbUser}'@'{$this->dbHost}' IDENTIFIED BY '{$this->dbPass}'");
+            $pdoRoot->exec("GRANT ALL PRIVILEGES ON `{$this->dbName}`.* TO '{$this->dbUser}'@'{$this->dbHost}'");
+            $pdoRoot->exec("FLUSH PRIVILEGES");
+
+            // Connexion à la base créée avec l’utilisateur dédié
             $this->conn = new PDO(
-                "mysql:host=$host;dbname=$dbname;charset=utf8",
-                $username,
-                $password,
+                "mysql:host={$this->dbHost};dbname={$this->dbName};charset=utf8mb4",
+                $this->dbUser,
+                $this->dbPass,
                 [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
             );
+
+            // Création des tables (similaire TikTok simplifié)
             $this->createTables();
-        } catch(PDOException $e) {
-            // Fallback vers SQLite si MySQL indisponible
+        } catch (PDOException $e) {
+            // Fallback SQLite si MySQL indisponible
             try {
                 $this->conn = new PDO('sqlite:hybridephp.db');
                 $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
                 $this->createTables();
-            } catch(PDOException $e2) {
-                die(json_encode(['success' => false, 'message' => 'Database connection failed']));
+            } catch (PDOException $e2) {
+                die(json_encode(['success' => false, 'message' => 'Database connection failed', 'error' => $e2->getMessage()]));
             }
         }
     }
-    
+
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
         }
         return self::$instance;
     }
-    
+
     public function getConnection() {
         return $this->conn;
     }
-    
+
     private function createTables() {
-        $sql = "CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
-            name VARCHAR(100) NOT NULL,
-            email VARCHAR(100) NOT NULL UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )";
-        
-        // Pour SQLite
-        if ($this->conn->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
-            $sql = str_replace('AUTO_INCREMENT', 'AUTOINCREMENT', $sql);
-        }
-        
-        $this->conn->exec($sql);
-        
-        // Ajouter des données de test
-        $count = $this->conn->query("SELECT COUNT(*) FROM users")->fetchColumn();
-        if ($count == 0) {
-            $users = [
-                ['John Doe', 'john@example.com'],
-                ['Jane Smith', 'jane@example.com'],
-                ['Bob Johnson', 'bob@example.com']
-            ];
-            
-            $stmt = $this->conn->prepare("INSERT INTO users (name, email) VALUES (?, ?)");
-            foreach ($users as $user) {
-                try {
-                    $stmt->execute($user);
-                } catch(PDOException $e) {
-                    // Ignorer les doublons
-                }
-            }
-        }
+        // USERS
+        $sqlUsers = "
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(50) NOT NULL UNIQUE,
+                email VARCHAR(100) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL,
+                avatar VARCHAR(255),
+                bio TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB;
+        ";
+        $this->conn->exec($sqlUsers);
+
+        // VIDEOS
+        $sqlVideos = "
+            CREATE TABLE IF NOT EXISTS videos (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                video_url VARCHAR(255) NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB;
+        ";
+        $this->conn->exec($sqlVideos);
+
+        // LIKES
+        $sqlLikes = "
+            CREATE TABLE IF NOT EXISTS likes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                video_id INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_like (user_id, video_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB;
+        ";
+        $this->conn->exec($sqlLikes);
+
+        // COMMENTS
+        $sqlComments = "
+            CREATE TABLE IF NOT EXISTS comments (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                video_id INT NOT NULL,
+                comment_text TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB;
+        ";
+        $this->conn->exec($sqlComments);
+
+        // FOLLOWERS (abonnements)
+        $sqlFollowers = "
+            CREATE TABLE IF NOT EXISTS followers (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                follower_id INT NOT NULL,
+                followed_id INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_follow (follower_id, followed_id),
+                FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (followed_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB;
+        ";
+        $this->conn->exec($sqlFollowers);
     }
 }
 
-// API Handler
 class API {
     private $db;
-    
+
     public function __construct() {
         $this->db = Database::getInstance()->getConnection();
     }
-    
+
     public function handleRequest() {
         $input = json_decode(file_get_contents('php://input'), true);
         $action = $input['action'] ?? '';
-        
+
         switch ($action) {
-            case 'getUsers':
-                return $this->getUsers();
-            case 'addUser':
-                return $this->addUser($input);
+            // ajoute ici tes actions : register, login, postVideo, likeVideo, commentVideo, followUser, etc.
             default:
                 return ['success' => false, 'message' => 'Action non reconnue'];
         }
     }
-    
-    private function getUsers() {
-        try {
-            $stmt = $this->db->query("SELECT * FROM users ORDER BY created_at DESC");
-            $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            return ['success' => true, 'data' => $users];
-        } catch (Exception $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
-        }
-    }
-    
-    private function addUser($data) {
-        if (empty($data['name']) || empty($data['email'])) {
-            return ['success' => false, 'message' => 'Nom et email requis'];
-        }
-        
-        try {
-            $stmt = $this->db->prepare("INSERT INTO users (name, email) VALUES (?, ?)");
-            $stmt->execute([$data['name'], $data['email']]);
-            
-            return [
-                'success' => true,
-                'message' => 'Utilisateur ajouté',
-                'id' => $this->db->lastInsertId()
-            ];
-        } catch (Exception $e) {
-            return ['success' => false, 'message' => 'Email déjà utilisé'];
-        }
-    }
+
+    // méthodes privées correspondant aux actions à ajouter ensuite...
 }
 
 // Exécution
 $api = new API();
 echo json_encode($api->handleRequest());
-?>
+
